@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { getJudgment, SCORES, JUDGMENT_WINDOWS } from '../utils/judgment';
+import { playHitSound } from '../utils/audio';
 
 const KEY_MAPPING: { [key: string]: number } = {
     'KeyD': 0,
@@ -36,10 +37,12 @@ export const useInput = () => {
                 const result = getJudgment(timeDiff);
 
                 if (result?.type === 'PERFECT') {
-                    handleHit(targetNote.id, SCORES.PERFECT, result.timing);
+                    handleHit(targetNote.id, 'PERFECT', result.timing);
+                    playHitSound('PERFECT');
                     console.log('PERFECT', result.timing);
                 } else if (result?.type === 'GOOD') {
-                    handleHit(targetNote.id, SCORES.GOOD, result.timing);
+                    handleHit(targetNote.id, 'GOOD', result.timing);
+                    playHitSound('GOOD');
                     console.log('GOOD', result.timing);
                 } else if (result?.type === 'MISS') {
                     handleMiss(targetNote.id);

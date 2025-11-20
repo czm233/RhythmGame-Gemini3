@@ -3,6 +3,8 @@ import { PerspectiveCamera } from '@react-three/drei';
 import { useGameStore } from '../store/gameStore';
 import { Note } from './Note';
 import { gameTimer } from '../utils/timer';
+import { JUDGMENT_WINDOWS } from '../utils/judgment';
+import { useInput } from '../hooks/useInput';
 
 const LaneVisuals = () => {
     return (
@@ -23,14 +25,15 @@ const LaneVisuals = () => {
     );
 };
 
-import { JUDGMENT_WINDOWS } from '../utils/judgment';
-import { useInput } from '../hooks/useInput';
 
-const GameLogic = () => {
-    const { updateTime, notes, handleMiss } = useGameStore();
+
+const GameLogic = ({ onEnd }: { onEnd: () => void }) => {
+    const { updateTime, notes, handleMiss, isPlaying, endGame } = useGameStore();
     useInput();
 
     useFrame(() => {
+        if (!isPlaying) return;
+
         const time = gameTimer.getTime();
         updateTime(time);
 
@@ -40,6 +43,13 @@ const GameLogic = () => {
                 handleMiss(note.id);
             }
         });
+
+        // Check for song end (simple check: if time > last note time + 2s)
+        const lastNote = notes[notes.length - 1];
+        if (lastNote && time > lastNote.time + 2000) {
+            endGame();
+            onEnd();
+        }
     });
 
     return (
@@ -51,7 +61,7 @@ const GameLogic = () => {
     );
 };
 
-export const GameScene = () => {
+export const GameScene = ({ onEnd }: { onEnd: () => void }) => {
     return (
         <div className="w-full h-full relative bg-black">
             {/* Video Background Placeholder */}
@@ -65,7 +75,7 @@ export const GameScene = () => {
                 <pointLight position={[10, 10, 10]} />
 
                 <LaneVisuals />
-                <GameLogic />
+                <GameLogic onEnd={onEnd} />
 
                 {/* <OrbitControls /> */}
             </Canvas>
