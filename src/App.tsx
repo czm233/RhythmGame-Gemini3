@@ -20,23 +20,42 @@ function App() {
       <div className="w-full h-full absolute inset-0">
         <GameScene />
 
+
         {/* HUD */}
         <div className="absolute top-4 left-4 text-white font-bold text-2xl font-mono z-10">
           SCORE: {score.toString().padStart(6, '0')}
         </div>
-        <div className="absolute top-4 right-4 text-white font-bold text-2xl font-mono z-10">
-          COMBO: {combo}
-        </div>
+
+        {/* Combo Display */}
+        {combo > 0 && (
+          <div className="absolute top-[20%] left-1/2 transform -translate-x-1/2 flex flex-col items-center z-10">
+            <div className="text-blue-200 font-bold text-2xl tracking-widest opacity-80">COMBO</div>
+            <div className="text-white font-black text-6xl leading-none drop-shadow-lg animate-pulse">
+              {combo}
+            </div>
+          </div>
+        )}
 
         {/* Judgment Display */}
         {lastJudgment && (
           <div
             key={lastJudgment.id}
-            className={`absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-4xl font-black tracking-widest animate-bounce z-10
+            className="absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10"
+          >
+            <div className={`text-4xl font-black tracking-widest animate-bounce
               ${lastJudgment.type === 'PERFECT' ? 'text-yellow-400' :
                 lastJudgment.type === 'GOOD' ? 'text-green-400' : 'text-red-500'}`}
-          >
-            {lastJudgment.type}
+            >
+              {lastJudgment.type}
+            </div>
+
+            {lastJudgment.timing && (
+              <div className={`text-xl font-bold mt-1
+                ${lastJudgment.timing === 'FAST' ? 'text-blue-400' : 'text-red-400'}`}
+              >
+                {lastJudgment.timing}
+              </div>
+            )}
           </div>
         )}
 

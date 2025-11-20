@@ -23,14 +23,23 @@ const LaneVisuals = () => {
     );
 };
 
+import { JUDGMENT_WINDOWS } from '../utils/judgment';
 import { useInput } from '../hooks/useInput';
 
 const GameLogic = () => {
-    const { updateTime, notes } = useGameStore();
+    const { updateTime, notes, handleMiss } = useGameStore();
     useInput();
 
     useFrame(() => {
-        updateTime(gameTimer.getTime());
+        const time = gameTimer.getTime();
+        updateTime(time);
+
+        // Check for misses
+        notes.forEach(note => {
+            if (!note.hit && !note.missed && (time - note.time > JUDGMENT_WINDOWS.MISS)) {
+                handleMiss(note.id);
+            }
+        });
     });
 
     return (

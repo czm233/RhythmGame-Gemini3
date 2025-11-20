@@ -52,15 +52,16 @@ export const useGameStore = create<GameState>((set) => ({
         set({ speed });
     },
 
-    handleHit: (noteId: string, scoreDelta: number) => {
+    handleHit: (noteId: string, scoreDelta: number, timing?: 'FAST' | 'LATE') => {
         set((state) => {
             const newCombo = state.combo + 1;
+            const type = scoreDelta === 100 ? 'PERFECT' : 'GOOD';
             return {
                 score: state.score + scoreDelta,
                 combo: newCombo,
                 maxCombo: Math.max(state.maxCombo, newCombo),
                 notes: state.notes.map(n => n.id === noteId ? { ...n, hit: true } : n),
-                lastJudgment: { type: scoreDelta === 100 ? 'PERFECT' : 'GOOD', id: noteId }
+                lastJudgment: { type, timing, id: noteId }
             };
         });
     },

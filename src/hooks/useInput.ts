@@ -33,15 +33,15 @@ export const useInput = () => {
 
             if (targetNote) {
                 const timeDiff = targetNote.time - currentTime;
-                const judgment = getJudgment(timeDiff);
+                const result = getJudgment(timeDiff);
 
-                if (judgment === 'PERFECT') {
-                    handleHit(targetNote.id, SCORES.PERFECT);
-                    console.log('PERFECT');
-                } else if (judgment === 'GOOD') {
-                    handleHit(targetNote.id, SCORES.GOOD);
-                    console.log('GOOD');
-                } else if (judgment === 'MISS') {
+                if (result?.type === 'PERFECT') {
+                    handleHit(targetNote.id, SCORES.PERFECT, result.timing);
+                    console.log('PERFECT', result.timing);
+                } else if (result?.type === 'GOOD') {
+                    handleHit(targetNote.id, SCORES.GOOD, result.timing);
+                    console.log('GOOD', result.timing);
+                } else if (result?.type === 'MISS') {
                     handleMiss(targetNote.id);
                     console.log('MISS');
                 }

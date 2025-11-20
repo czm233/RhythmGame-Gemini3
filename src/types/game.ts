@@ -20,7 +20,7 @@ export interface GameState {
     maxCombo: number;
     speed: number; // 1-10
     notes: Note[];
-    lastJudgment: { type: 'PERFECT' | 'GOOD' | 'MISS', id: string } | null;
+    lastJudgment: { type: 'PERFECT' | 'GOOD' | 'MISS', timing?: 'FAST' | 'LATE', id: string } | null;
 
     // Actions
     startGame: () => void;
