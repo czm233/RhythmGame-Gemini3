@@ -51,7 +51,7 @@ export const GameScene = () => {
             </div>
 
             <Canvas>
-                <PerspectiveCamera makeDefault position={[0, 3, 5]} rotation={[-0.4, 0, 0]} />
+                <PerspectiveCamera makeDefault position={[0, 2, 6]} rotation={[-0.1, 0, 0]} fov={60} />
                 <ambientLight intensity={0.5} />
                 <pointLight position={[10, 10, 10]} />
 
