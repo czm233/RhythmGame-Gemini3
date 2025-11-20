@@ -1,4 +1,6 @@
-# React + TypeScript + Vite
+# 这是一个完全由Gemini 3 Pro + Antigravity生产的音游
+
+完全不需要人类写哪怕一行代码，挑战做出一款音乐游戏
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
