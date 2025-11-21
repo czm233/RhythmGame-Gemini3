@@ -6,6 +6,17 @@ This document defines the navigation flow and hierarchy of the Rhythm Game appli
 
 ```
 App (Root)
+├── LandingPage (初始/登录界面)
+│   ├── QR Code (Mock Login)
+│   └── Skip Button -> Go to ModeSelectPage
+│
+├── ModeSelectPage (模式选择界面)
+│   ├── Game Mode Card -> Go to SongSelect
+│   └── Editor Mode Card -> Go to EditorPage
+│
+├── EditorPage (写谱器界面 - Placeholder)
+│   └── Navigation: Back -> Go to ModeSelectPage
+│
 ├── SongSelect (选歌界面)
 │   ├── Infinite Carousel (Song Cards)
 │   └── Navigation: Click Card -> Go to SongDetail
@@ -50,3 +61,17 @@ App (Root)
     -   **Purpose**: Display game results and statistics.
     -   **Key Features**: Rank badge, Score breakdown, Accuracy circle.
     -   **Interaction**: View stats, Return to SongSelect.
+
+5.  **LandingPage (初始/登录界面)**:
+    -   **Purpose**: Entry point, user authentication (mock).
+    -   **Key Features**: QR Code, Skip button.
+    -   **Interaction**: Scan/Skip to enter.
+
+6.  **ModeSelectPage (模式选择界面)**:
+    -   **Purpose**: Choose between playing and creating.
+    -   **Key Features**: Two large cards (Game Mode, Editor Mode).
+    -   **Interaction**: Select mode.
+
+7.  **EditorPage (写谱器界面)**:
+    -   **Purpose**: Create and edit beatmaps (Future).
+    -   **Key Features**: Placeholder for now.
