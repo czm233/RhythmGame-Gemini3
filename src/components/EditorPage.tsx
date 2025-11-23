@@ -10,9 +10,12 @@ interface EditorPageProps {
 
 export const EditorPage = ({ onBack }: EditorPageProps) => {
     const {
-        currentTime, isPlaying, snapDivisor, zoomLevel, notes, selectedNoteIds, selectedToolColor, audioUrl, audioFileName, hitSoundVolume, hitSoundType,
-        togglePlay, setTime, setSnap, setZoom, addNote, removeNote, selectNote, updateNote, updateNotes, setToolColor, setAudioUrl, setAudioFileName, setHitSoundVolume, setHitSoundType, setSelectedNotes,
-        copySelection, pasteNotes, mirrorSelection, deleteSelection
+        currentTime, isPlaying, snapDivisor, zoomLevel, notes, selectedNoteIds, selectedToolColor, audioUrl, audioFileName,         hitSoundVolume, hitSoundType,
+        loopStart, loopEnd,
+        togglePlay, setTime, setSnap, setZoom, addNote, removeNote, selectNote, updateNote, updateNotes,
+        setToolColor, setAudioUrl, setAudioFileName, setHitSoundVolume, setHitSoundType, setSelectedNotes,
+        setLoopStart, setLoopEnd,
+        copySelection, pasteNotes, mirrorSelection, randomizeSelection, deleteSelection
     } = useEditorStore();
 
     // Dragging state
@@ -258,22 +261,78 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                 setToolColor('pink');
             }
 
+            // Loop Controls: I (In), O (Out), P (Clear)
+            if (e.key.toLowerCase() === 'i') {
+                e.preventDefault();
+                // Snap currentTime
+                let time = currentTime;
+                if (snapDivisor > 0) {
+                    const beatTime = 60000 / 120;
+                    const snapInterval = beatTime * (4 / snapDivisor);
+                    time = Math.round(time / snapInterval) * snapInterval;
+                }
+                setLoopStart(time);
+            }
+            if (e.key.toLowerCase() === 'o') {
+                e.preventDefault();
+                // Snap currentTime
+                let time = currentTime;
+                if (snapDivisor > 0) {
+                    const beatTime = 60000 / 120;
+                    const snapInterval = beatTime * (4 / snapDivisor);
+                    time = Math.round(time / snapInterval) * snapInterval;
+                }
+                setLoopEnd(time);
+            }
+            if (e.key.toLowerCase() === 'p') {
+                e.preventDefault();
+                setLoopStart(null);
+                setLoopEnd(null);
+            }
+
+            // Quick Note Place: Q, W, E, R (Lanes 1-4)
+            const keyToLane: Record<string, number> = { 'q': 0, 'w': 1, 'e': 2, 'r': 3 };
+            if (keyToLane.hasOwnProperty(e.key.toLowerCase())) {
+                e.preventDefault();
+                const lane = keyToLane[e.key.toLowerCase()];
+                let time = currentTime;
+
+                // Apply snap
+                if (snapDivisor > 0) {
+                    const beatTime = 60000 / 120;
+                    const snapInterval = beatTime * (4 / snapDivisor);
+                    time = Math.round(time / snapInterval) * snapInterval;
+                }
+
+                addNote(lane, time);
+            }
+
             // Scrolling: Arrow Up/Down
             if (e.code === 'ArrowUp') {
                 e.preventDefault();
                 // Move forward in time (Up the chart)
-                // Use a fixed delta similar to scroll wheel (e.g. 100)
-                // Adjust speed based on zoom?
                 const delta = 100;
                 const timeDelta = delta * (1000 / zoomLevel);
-                setTime(Math.max(0, currentTime + timeDelta));
+                const newTime = Math.max(0, currentTime + timeDelta);
+                setTime(newTime);
+
+                // If playing, also seek the audio immediately
+                if (isPlaying && audioRef.current) {
+                    audioRef.current.currentTime = newTime / 1000;
+                }
             }
             if (e.code === 'ArrowDown') {
                 e.preventDefault();
                 // Move backward in time (Down the chart)
                 const delta = -100;
                 const timeDelta = delta * (1000 / zoomLevel);
-                setTime(Math.max(0, currentTime + timeDelta));
+                const newTime = Math.max(0, currentTime + timeDelta);
+                setTime(newTime);
+
+                // If playing, also seek the audio immediately
+                if (isPlaying && audioRef.current) {
+                    audioRef.current.currentTime = newTime / 1000;
+                }
             }
         };
 
@@ -311,12 +370,38 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                     lastTime = now;
                 }
 
-                // Check for notes passed in this frame (simple check for hit sound)
-                notes.forEach((note: Note) => {
-                    if (note.time > currentTime && note.time <= newTime) {
-                        playHitSound('PERFECT', hitSoundVolume, hitSoundType);
+                // Check for Loop wrapping
+                if (loopStart !== null && loopEnd !== null && loopEnd > loopStart) {
+                    if (newTime >= loopEnd) {
+                        newTime = loopStart;
+                        if (audioRef.current) {
+                            audioRef.current.currentTime = loopStart / 1000;
+                        }
+                        // Force update local variable to avoid large delta check failure on loop
+                        // But wait, if we loop, delta WILL be large (end -> start).
+                        // We should handle loop sound checking separately or reset context.
                     }
-                });
+                }
+
+                // 1. Calculate accurate delta
+                // Note: currentTime is from the closure (React state at effect start), 
+                // newTime is from Audio/Performance.
+                const timeDelta = Math.abs(newTime - currentTime);
+
+                // 2. Only Play Hits if time diff is consistent with a single frame (e.g. < 50ms)
+                // This effectively filters out:
+                // - Seeking / Scrolling (large jumps)
+                // - Initial play start (potential jump)
+                // - Loop jumps (handled separately if needed, but usually we don't want a hit ON the loop jump instantly)
+                
+                if (timeDelta > 0 && timeDelta < 50) {
+                    notes.forEach((note: Note) => {
+                        // Strict range check
+                        if (note.time > currentTime && note.time <= newTime) {
+                            playHitSound('PERFECT', hitSoundVolume, hitSoundType);
+                        }
+                    });
+                }
 
                 setTime(newTime);
 
@@ -516,6 +601,54 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
 
                         <div className="w-px h-6 bg-gray-700 mx-2" />
 
+                        {/* Loop Controls */}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => {
+                                    let time = currentTime;
+                                    if (snapDivisor > 0) {
+                                        const beatTime = 60000 / 120;
+                                        const snapInterval = beatTime * (4 / snapDivisor);
+                                        time = Math.round(time / snapInterval) * snapInterval;
+                                    }
+                                    setLoopStart(time);
+                                }}
+                                className={`px-3 py-1 rounded text-xs font-bold transition-colors flex items-center gap-2 ${loopStart !== null ? 'bg-green-600/50 text-white border border-green-500' : 'bg-gray-700 text-gray-400 hover:text-white'}`}
+                                title="Set Loop Start [I]"
+                            >
+                                <span>In</span>
+                            </button>
+                            <button
+                                onClick={() => {
+                                    let time = currentTime;
+                                    if (snapDivisor > 0) {
+                                        const beatTime = 60000 / 120;
+                                        const snapInterval = beatTime * (4 / snapDivisor);
+                                        time = Math.round(time / snapInterval) * snapInterval;
+                                    }
+                                    setLoopEnd(time);
+                                }}
+                                className={`px-3 py-1 rounded text-xs font-bold transition-colors flex items-center gap-2 ${loopEnd !== null ? 'bg-green-600/50 text-white border border-green-500' : 'bg-gray-700 text-gray-400 hover:text-white'}`}
+                                title="Set Loop End [O]"
+                            >
+                                <span>Out</span>
+                            </button>
+                            {(loopStart !== null || loopEnd !== null) && (
+                                <button
+                                    onClick={() => {
+                                        setLoopStart(null);
+                                        setLoopEnd(null);
+                                    }}
+                                    className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-400 hover:text-white"
+                                    title="Clear Loop [P]"
+                                >
+                                    ×
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="w-px h-6 bg-gray-700 mx-2" />
+
                         {/* Edit Actions */}
                         <div className="flex gap-2">
                             <button
@@ -538,6 +671,13 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                                 title="Mirror [Ctrl+M]"
                             >
                                 <span>镜像</span>
+                            </button>
+                            <button
+                                onClick={randomizeSelection}
+                                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-200 flex items-center gap-2"
+                                title="Randomize Lanes"
+                            >
+                                <span>随机</span>
                             </button>
                             <button
                                 onClick={deleteSelection}
@@ -620,6 +760,20 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                                 {[1, 2, 3].map(i => (
                                     <div key={i} className="absolute bottom-0 top-[-100000px] w-px bg-gray-800" style={{ left: `${i * 25}%` }} />
                                 ))}
+
+                                {/* Loop Region Visualization */}
+                                {loopStart !== null && loopEnd !== null && (
+                                    <div
+                                        className="absolute left-0 right-0 bg-green-500/20 border-y border-green-500/50 z-10 pointer-events-none"
+                                        style={{
+                                            bottom: `${loopStart / 1000 * zoomLevel}px`,
+                                            height: `${(loopEnd - loopStart) / 1000 * zoomLevel}px`
+                                        }}
+                                    >
+                                        <div className="absolute bottom-0 left-0 bg-green-600 text-white text-[10px] px-1">A</div>
+                                        <div className="absolute top-0 left-0 bg-green-600 text-white text-[10px] px-1">B</div>
+                                    </div>
+                                )}
 
                                 {/* Notes */}
                                 {notes.map(note => (

@@ -21,6 +21,10 @@ interface EditorState {
     hitSoundVolume: number;
     hitSoundType: string;
 
+    // Loop Region
+    loopStart: number | null;
+    loopEnd: number | null;
+
     // Actions
     togglePlay: () => void;
     setTime: (time: number) => void;
@@ -40,11 +44,16 @@ interface EditorState {
     setSelectedNotes: (ids: string[]) => void;
     updateNotes: (updates: { id: string, changes: Partial<Note> }[]) => void;
 
+    // Loop Actions
+    setLoopStart: (time: number | null) => void;
+    setLoopEnd: (time: number | null) => void;
+
     // Clipboard & Tools
     clipboard: Note[];
     copySelection: () => void;
     pasteNotes: (targetTime: number) => void;
     mirrorSelection: () => void;
+    randomizeSelection: () => void;
     deleteSelection: () => void;
 }
 
@@ -61,6 +70,9 @@ export const useEditorStore = create<EditorState>((set) => ({
     audioFileName: '',
     hitSoundVolume: 0.8,
     hitSoundType: 'default',
+
+    loopStart: null,
+    loopEnd: null,
 
     clipboard: [],
 
@@ -108,6 +120,9 @@ export const useEditorStore = create<EditorState>((set) => ({
         })
     })),
 
+    setLoopStart: (time) => set({ loopStart: time }),
+    setLoopEnd: (time) => set({ loopEnd: time }),
+
     // Clipboard & Tools
     copySelection: () => set((state) => {
         const selected = state.notes.filter(n => state.selectedNoteIds.includes(n.id));
@@ -145,6 +160,20 @@ export const useEditorStore = create<EditorState>((set) => ({
             }
             return note;
         });
+        return { notes: updates };
+    }),
+
+    randomizeSelection: () => set((state) => {
+        const updates = state.notes.map(note => {
+            if (state.selectedNoteIds.includes(note.id)) {
+                // Randomize lane (0-3) independently
+                const randomLane = Math.floor(Math.random() * 4);
+                return { ...note, lane: randomLane };
+            }
+            return note;
+        });
+        // Note: This might cause overlaps (multiple notes at same time/lane).
+        // Based on "each row has its own independent random", this is the expected behavior.
         return { notes: updates };
     }),
 
