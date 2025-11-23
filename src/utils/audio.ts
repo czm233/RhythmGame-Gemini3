@@ -11,7 +11,7 @@ export const initAudio = () => {
     }
 };
 
-export const playHitSound = (type: 'PERFECT' | 'GOOD' = 'PERFECT') => {
+export const playHitSound = (type: 'PERFECT' | 'GOOD' = 'PERFECT', volume: number = 0.8, soundType: string = 'default') => {
     if (!audioContext) initAudio();
     if (!audioContext) return;
 
@@ -21,19 +21,45 @@ export const playHitSound = (type: 'PERFECT' | 'GOOD' = 'PERFECT') => {
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
 
-    // Different sound for Perfect vs Good?
-    // Perfect: Higher pitch, sharper
-    // Good: Slightly lower
+    let startFreq = 1200;
+    let endFreq = 100;
+    let duration = 0.1;
+    let waveType: OscillatorType = 'sine';
 
-    const startFreq = type === 'PERFECT' ? 1200 : 800;
-    const endFreq = 100;
-    const duration = 0.1;
+    // Configure sound based on type
+    switch (soundType) {
+        case 'kick':
+            startFreq = 150;
+            endFreq = 0.01;
+            duration = 0.15;
+            waveType = 'sine';
+            break;
+        case 'snare':
+            // Noise burst simulation (simplified with high freq triangle)
+            startFreq = 800;
+            endFreq = 100;
+            duration = 0.05;
+            waveType = 'triangle';
+            break;
+        case 'tick':
+            startFreq = 2000;
+            endFreq = 2000;
+            duration = 0.02;
+            waveType = 'square';
+            break;
+        default: // 'default'
+            startFreq = type === 'PERFECT' ? 1200 : 800;
+            endFreq = 100;
+            duration = 0.1;
+            waveType = 'sine';
+            break;
+    }
 
-    oscillator.type = 'sine';
+    oscillator.type = waveType;
     oscillator.frequency.setValueAtTime(startFreq, audioContext.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(endFreq, audioContext.currentTime + duration);
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(0.01, endFreq), audioContext.currentTime + duration);
 
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
 
     oscillator.start();

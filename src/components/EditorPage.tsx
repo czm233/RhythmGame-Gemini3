@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useEditorStore } from '../store/editorStore';
 import { playHitSound, initAudio } from '../utils/audio';
@@ -9,63 +9,181 @@ interface EditorPageProps {
 
 export const EditorPage = ({ onBack }: EditorPageProps) => {
     const {
-        currentTime, isPlaying, snapDivisor, zoomLevel, notes, selectedNoteIds, selectedToolColor, audioUrl, audioFileName,
-        togglePlay, setTime, setSnap, setZoom, addNote, removeNote, selectNote, updateNote, setToolColor, setAudioUrl, setAudioFileName
+        currentTime, isPlaying, snapDivisor, zoomLevel, notes, selectedNoteIds, selectedToolColor, audioUrl, audioFileName, hitSoundVolume, hitSoundType,
+        togglePlay, setTime, setSnap, setZoom, addNote, removeNote, selectNote, updateNote, updateNotes, setToolColor, setAudioUrl, setAudioFileName, setHitSoundVolume, setHitSoundType, setSelectedNotes,
+        copySelection, pasteNotes, mirrorSelection, deleteSelection
     } = useEditorStore();
 
     // Dragging state
-    const dragRef = useRef<{ id: string, startY: number, startX: number, startTime: number, startLane: number } | null>(null);
+    // Modified to support multi-note dragging
+    const dragRef = useRef<{
+        startX: number,
+        startY: number,
+        notes: { id: string, startTime: number, startLane: number }[]
+    } | null>(null);
 
     // Audio refs
     const fileInputRef = useRef<HTMLInputElement>(null);
     const audioRef = useRef<HTMLAudioElement>(null);
 
-    // Handle mouse move for dragging
+    // Selection state
+    // We use ref for logic to avoid stale closures in event listeners
+    const selectionRef = useRef<{ startX: number, startY: number, currentX: number, currentY: number, isSelecting: boolean } | null>(null);
+    // We use state for rendering the visual box
+    const [selectionBox, setSelectionBox] = useState<{ startX: number, startY: number, currentX: number, currentY: number } | null>(null);
+
+    // Handle mouse move (Global)
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
-            if (!dragRef.current) return;
+            // 1. Handle Note Dragging
+            if (dragRef.current) {
+                const { startY, startX, notes: draggingNotes } = dragRef.current;
+                const deltaY = startY - e.clientY; // Drag up = positive time
+                const deltaX = e.clientX - startX;
 
-            const { id, startY, startX, startTime, startLane } = dragRef.current;
-            const deltaY = startY - e.clientY; // Drag up = positive time
-            const deltaX = e.clientX - startX;
+                // Calculate time delta
+                const timeDelta = (deltaY / zoomLevel) * 1000;
 
-            console.log('Dragging:', { id, deltaX, deltaY });
+                // Calculate lane delta
+                const laneWidth = 100; // Approx
+                const laneDelta = Math.round(deltaX / laneWidth);
 
-            // Calculate new time
-            const timeDelta = (deltaY / zoomLevel) * 1000;
-            let newTime = startTime + timeDelta;
+                const updates: { id: string, changes: Partial<any> }[] = [];
 
-            // Snap time
-            if (snapDivisor > 0 && !e.shiftKey) {
-                const beatTime = 60000 / 120;
-                const snapInterval = beatTime * (4 / snapDivisor);
-                newTime = Math.round(newTime / snapInterval) * snapInterval;
+                draggingNotes.forEach(note => {
+                    let newTime = note.startTime + timeDelta;
+
+                    // Snap time
+                    if (snapDivisor > 0 && !e.shiftKey) {
+                        const beatTime = 60000 / 120;
+                        const snapInterval = beatTime * (4 / snapDivisor);
+                        newTime = Math.round(newTime / snapInterval) * snapInterval;
+                    }
+                    newTime = Math.max(0, newTime);
+
+                    let newLane = note.startLane + laneDelta;
+                    // Individual clamping as requested:
+                    // "touched note placed at first track, untouched ones normal"
+                    // This implies we clamp each note individually to [0, 3]
+                    newLane = Math.max(0, Math.min(3, newLane));
+
+                    updates.push({
+                        id: note.id,
+                        changes: {
+                            time: newTime,
+                            lane: newLane
+                        }
+                    });
+                });
+
+                updateNotes(updates);
+                return;
             }
-            newTime = Math.max(0, newTime);
 
-            // Calculate new lane
-            // Lane width is approx 25% of container width. 
-            // We need to know container width, but we can estimate or use pixels.
-            // Let's assume container is 400px wide (fixed in CSS).
-            const laneWidth = 100;
-            const laneDelta = Math.round(deltaX / laneWidth);
-            let newLane = startLane + laneDelta;
-            newLane = Math.max(0, Math.min(3, newLane));
+            // 2. Handle Box Selection
+            if (selectionRef.current && selectionRef.current.isSelecting) {
+                // Update ref
+                selectionRef.current.currentX = e.clientX;
+                selectionRef.current.currentY = e.clientY;
 
-            console.log('Update Note:', { id, newTime, newLane });
+                // Update state for rendering
+                setSelectionBox({
+                    startX: selectionRef.current.startX,
+                    startY: selectionRef.current.startY,
+                    currentX: e.clientX,
+                    currentY: e.clientY
+                });
 
-            updateNote(id, {
-                time: newTime,
-                lane: newLane,
-                color: (newLane === 1 || newLane === 2) ? 'pink' : 'blue'
+                // Real-time selection update
+                updateSelection(selectionRef.current);
+            }
+        };
+
+        const updateSelection = (box: { startX: number, startY: number, currentX: number, currentY: number }) => {
+            const trackContainer = document.querySelector('.track-area');
+            if (!trackContainer) return;
+
+            const trackRect = trackContainer.getBoundingClientRect();
+
+            // Convert Box to Game Coordinates
+            const boxTop = Math.min(box.startY, box.currentY);
+            const boxBottom = Math.max(box.startY, box.currentY);
+            const boxLeft = Math.min(box.startX, box.currentX);
+            const boxRight = Math.max(box.startX, box.currentX);
+
+            // Y to Time
+            // Track Bottom (Time 0) is at trackRect.bottom (since height is 0, top=bottom)
+            // But wait, trackRect.bottom is screen Y.
+            // Time = (Distance from Bottom / Zoom) * 1000
+            // Distance from Bottom = trackRect.bottom - y
+            const maxTime = ((trackRect.bottom - boxTop) / zoomLevel) * 1000;
+            const minTime = ((trackRect.bottom - boxBottom) / zoomLevel) * 1000;
+
+            // X to Lane
+            // Lane 0 starts at trackRect.left
+            // Lane Width = trackRect.width / 4
+            const laneWidth = trackRect.width / 4;
+            const minLane = Math.floor((boxLeft - trackRect.left) / laneWidth);
+            const maxLane = Math.floor((boxRight - trackRect.left) / laneWidth);
+
+            const newSelectedIds: string[] = [];
+
+            notes.forEach(note => {
+                // Check intersection
+                // For time: simple range check
+                // For lane: simple range check
+                // We add a small buffer for easier selection
+                const isTimeIn = note.time >= minTime && note.time <= maxTime;
+                const isLaneIn = note.lane >= minLane && note.lane <= maxLane;
+
+                if (isTimeIn && isLaneIn) {
+                    newSelectedIds.push(note.id);
+                }
             });
+
+            setSelectedNotes(newSelectedIds);
         };
 
-        const handleMouseUp = () => {
+        const handleMouseUp = (e: MouseEvent) => {
             dragRef.current = null;
+
+            if (selectionRef.current && selectionRef.current.isSelecting) {
+                const dist = Math.hypot(e.clientX - selectionRef.current.startX, e.clientY - selectionRef.current.startY);
+
+                if (dist < 5) {
+                    // Click: Add Note
+                    // We need to calculate the position based on e.clientX/Y
+                    const trackContainer = document.querySelector('.track-area');
+                    if (trackContainer) {
+                        const rect = trackContainer.getBoundingClientRect();
+                        const yFromBottom = rect.bottom - e.clientY;
+                        const laneWidth = rect.width / 4;
+                        const x = e.clientX - rect.left;
+                        const lane = Math.floor(x / laneWidth);
+                        const rawTime = (yFromBottom / zoomLevel) * 1000;
+
+                        const beatTime = 60000 / 120;
+                        let snappedTime = rawTime;
+
+                        if (snapDivisor > 0 && !e.shiftKey) {
+                            const snapInterval = beatTime * (4 / snapDivisor);
+                            snappedTime = Math.round(rawTime / snapInterval) * snapInterval;
+                        }
+
+                        if (snappedTime >= 0 && lane >= 0 && lane <= 3) {
+                            addNote(lane, snappedTime);
+                        }
+                    }
+                } else {
+                    // Drag: Selection Finished
+                    // Already handled in mousemove
+                }
+
+                selectionRef.current = null;
+                setSelectionBox(null);
+            }
         };
 
-        // Always attach listeners, check dragRef inside handler
         window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseup', handleMouseUp);
 
@@ -73,7 +191,7 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [zoomLevel, snapDivisor, updateNote]);
+    }, [zoomLevel, snapDivisor, updateNote, notes, setSelectedNotes, addNote, updateNotes]);
 
     // Playback control
     useEffect(() => {
@@ -85,6 +203,82 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
             }
         }
     }, [isPlaying]);
+
+    // Keyboard shortcuts
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Ignore if typing in an input
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+                return;
+            }
+
+            // Space: Play/Pause
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (audioUrl) {
+                    togglePlay();
+                }
+                return;
+            }
+
+            // Copy: Ctrl+C
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyC') {
+                e.preventDefault();
+                copySelection();
+                return;
+            }
+
+            // Paste: Ctrl+V
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyV') {
+                e.preventDefault();
+                pasteNotes(currentTime);
+                return;
+            }
+
+            // Mirror: Ctrl+M
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyM') {
+                e.preventDefault();
+                mirrorSelection();
+                return;
+            }
+
+            // Delete: Delete or Backspace
+            if (e.code === 'Delete' || e.code === 'Backspace') {
+                e.preventDefault();
+                deleteSelection();
+                return;
+            }
+
+            // Tools: 1 (Blue), 2 (Pink)
+            if (e.key === '1') {
+                setToolColor('blue');
+            }
+            if (e.key === '2') {
+                setToolColor('pink');
+            }
+
+            // Scrolling: Arrow Up/Down
+            if (e.code === 'ArrowUp') {
+                e.preventDefault();
+                // Move forward in time (Up the chart)
+                // Use a fixed delta similar to scroll wheel (e.g. 100)
+                // Adjust speed based on zoom?
+                const delta = 100;
+                const timeDelta = delta * (1000 / zoomLevel);
+                setTime(Math.max(0, currentTime + timeDelta));
+            }
+            if (e.code === 'ArrowDown') {
+                e.preventDefault();
+                // Move backward in time (Down the chart)
+                const delta = -100;
+                const timeDelta = delta * (1000 / zoomLevel);
+                setTime(Math.max(0, currentTime + timeDelta));
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [audioUrl, togglePlay, currentTime, copySelection, pasteNotes, mirrorSelection, deleteSelection, setToolColor, zoomLevel, setTime]);
 
     // Sync audio time when NOT playing (scrubbing)
     useEffect(() => {
@@ -117,11 +311,9 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                 }
 
                 // Check for notes passed in this frame (simple check for hit sound)
-                // Note: This might trigger multiple times if we seek back, but for playback it's fine.
-                // A better way is to track "lastProcessedTime"
-                notes.forEach(note => {
+                notes.forEach((note: any) => {
                     if (note.time > currentTime && note.time <= newTime) {
-                        playHitSound('PERFECT');
+                        playHitSound('PERFECT', hitSoundVolume, hitSoundType);
                     }
                 });
 
@@ -142,83 +334,59 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
         }
 
         return () => cancelAnimationFrame(animationFrame);
-    }, [isPlaying, currentTime, setTime, notes, togglePlay]);
-
-    // Format time as mm:ss.ms
-    const formatTime = (ms: number) => {
-        const totalSeconds = Math.floor(ms / 1000);
-        const minutes = Math.floor(totalSeconds / 60);
-        const seconds = totalSeconds % 60;
-        const millis = Math.floor(ms % 1000);
-        return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}`;
-    };
+    }, [isPlaying, currentTime, setTime, notes, togglePlay, playHitSound, hitSoundVolume, hitSoundType]);
 
     return (
-        <div className="w-full h-full bg-gray-900 flex flex-col text-white overflow-hidden">
-            {/* Top Toolbar */}
-            {/* Top Toolbar */}
-            <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center px-4 gap-4 shrink-0 z-20">
-                <button onClick={onBack} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-bold">
-                    ← 返回
-                </button>
-
-                <div className="h-8 w-px bg-gray-600 mx-2" />
-
-                <button
-                    onClick={() => {
-                        initAudio();
-                        togglePlay();
-                    }}
-                    className={`px-6 py-2 rounded font-bold min-w-[100px] ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'}`}
-                >
-                    {isPlaying ? '暂停 (Space)' : '播放 (Space)'}
-                </button>
-
-                <div className="font-mono text-xl bg-black/50 px-4 py-2 rounded border border-gray-600 min-w-[140px] text-center">
-                    {formatTime(currentTime)}
+        <div className="h-screen w-screen bg-gray-900 text-white flex flex-col overflow-hidden select-none">
+            {/* Top Bar */}
+            <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center px-4 justify-between z-50">
+                <div className="flex items-center gap-4">
+                    <button onClick={onBack} className="text-gray-400 hover:text-white">
+                        ← 返回
+                    </button>
+                    <div className="text-sm font-mono text-gray-300">
+                        {audioFileName || "No Audio Loaded"}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={togglePlay}
+                            disabled={!audioUrl}
+                            className={`px-4 py-1 rounded ${!audioUrl ? 'bg-gray-700 text-gray-500 cursor-not-allowed' : isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'}`}
+                        >
+                            {isPlaying ? '暂停 (Space)' : '播放 (Space)'}
+                        </button>
+                        <div className="text-xl font-mono w-24 text-center">
+                            {(currentTime / 1000).toFixed(3)}s
+                        </div>
+                    </div>
                 </div>
 
-                <div className="flex-1 flex items-center gap-2 ml-4">
-                    <input
-                        type="text"
-                        value={audioFileName || ''}
-                        readOnly
-                        placeholder="未加载音频"
-                        className="flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-gray-400 cursor-not-allowed"
-                    />
+                <div className="flex items-center gap-4">
                     <input
                         type="file"
+                        accept="audio/*"
                         ref={fileInputRef}
                         className="hidden"
-                        accept="audio/*"
                         onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) {
                                 const url = URL.createObjectURL(file);
                                 setAudioUrl(url);
                                 setAudioFileName(file.name);
-                                // Reset time to 0 when loading new song
-                                setTime(0);
-                                if (audioRef.current) {
-                                    audioRef.current.load();
-                                }
+                                initAudio(); // Init context on user interaction
                             }
                         }}
                     />
                     <button
                         onClick={() => fileInputRef.current?.click()}
-                        className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm font-bold whitespace-nowrap"
+                        className="px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded text-sm"
                     >
-                        打开文件...
+                        打开音频
                     </button>
-                    <audio ref={audioRef} src={audioUrl} />
+                    <button className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                        导出谱面
+                    </button>
                 </div>
-
-                <div className="h-8 w-px bg-gray-600 mx-2" />
-
-                <button className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-bold">
-                    导出 JSON
-                </button>
             </div>
 
             {/* Main Editor Area */}
@@ -277,120 +445,256 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                             </button>
                         </div>
                     </div>
+
+                    {/* Hit Sound Settings */}
+                    <div className="space-y-4 border-t border-gray-700 pt-4">
+                        <h3 className="text-gray-400 font-bold">音效设置</h3>
+
+                        <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">音量 (Volume): {(hitSoundVolume * 100).toFixed(0)}%</label>
+                            <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.1"
+                                value={hitSoundVolume}
+                                onChange={(e) => {
+                                    const vol = Number(e.target.value);
+                                    setHitSoundVolume(vol);
+                                    // Preview sound
+                                    playHitSound('PERFECT', vol, hitSoundType);
+                                }}
+                                className="w-full"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm text-gray-400 block">音效类型 (Type)</label>
+                            <select
+                                value={hitSoundType}
+                                onChange={(e) => {
+                                    const type = e.target.value;
+                                    setHitSoundType(type);
+                                    playHitSound('PERFECT', hitSoundVolume, type);
+                                }}
+                                className="w-full bg-gray-700 border border-gray-600 rounded px-2 py-2 text-sm"
+                            >
+                                <option value="default">默认 (Default)</option>
+                                <option value="kick">底鼓 (Kick)</option>
+                                <option value="snare">军鼓 (Snare)</option>
+                                <option value="tick">节拍 (Tick)</option>
+                            </select>
+                        </div>
+                    </div>
                 </div>
 
                 {/* Center: Timeline & Tracks */}
-                <div
-                    className="flex-1 bg-gray-950 relative overflow-hidden cursor-crosshair"
-                    onWheel={(e) => {
-                        // Scroll to change time
-                        const delta = e.deltaY;
-                        // Zoom factor affects scroll speed?
-                        const timeDelta = delta * (1000 / zoomLevel);
-                        setTime(currentTime + timeDelta);
-                    }}
-                >
-                    <div className="absolute inset-0 flex justify-center">
-                        {/* Fixed Judgment Line */}
-                        <div className="absolute left-0 right-0 bottom-[20%] h-1 bg-red-500 z-20 shadow-[0_0_10px_rgba(239,68,68,0.8)] pointer-events-none">
-                            <div className="absolute right-0 bottom-0 text-red-500 text-xs font-mono bg-black/50 px-1">
-                                JUDGMENT
-                            </div>
+                <div className="flex-1 bg-gray-950 relative overflow-hidden cursor-crosshair flex flex-col">
+                    {/* Toolbar - Placed above the track area as requested */}
+                    <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center px-4 gap-4 z-50">
+                        {/* Color Tools */}
+                        <div className="flex bg-gray-900 rounded p-1 gap-1">
+                            <button
+                                onClick={() => setToolColor('blue')}
+                                className={`px-3 py-1 rounded text-xs font-bold transition-colors ${selectedToolColor === 'blue' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                                title="Blue Note [1]"
+                            >
+                                Blue
+                            </button>
+                            <button
+                                onClick={() => setToolColor('pink')}
+                                className={`px-3 py-1 rounded text-xs font-bold transition-colors ${selectedToolColor === 'pink' ? 'bg-pink-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                                title="Pink Note [2]"
+                            >
+                                Pink
+                            </button>
                         </div>
 
-                        {/* Moving Track Container */}
-                        <div
-                            className="w-[400px] absolute bottom-[20%] border-x border-gray-800 bg-black/20"
-                            style={{
-                                height: '0px', // Allow overflow
-                                transform: `translateY(${currentTime / 1000 * zoomLevel}px)`,
-                                transition: isPlaying ? 'none' : 'transform 0.1s ease-out'
-                            }}
-                        >
-                            {/* Grid Lines */}
-                            <div className="absolute bottom-0 left-0 right-0 pointer-events-none opacity-20"
+                        <div className="w-px h-6 bg-gray-700 mx-2" />
+
+                        {/* Edit Actions */}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={copySelection}
+                                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-200 flex items-center gap-2"
+                                title="Copy [Ctrl+C]"
+                            >
+                                <span>复制</span>
+                            </button>
+                            <button
+                                onClick={() => pasteNotes(currentTime)}
+                                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-200 flex items-center gap-2"
+                                title="Paste [Ctrl+V]"
+                            >
+                                <span>粘贴</span>
+                            </button>
+                            <button
+                                onClick={mirrorSelection}
+                                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-200 flex items-center gap-2"
+                                title="Mirror [Ctrl+M]"
+                            >
+                                <span>镜像</span>
+                            </button>
+                            <button
+                                onClick={deleteSelection}
+                                className="px-3 py-1 bg-red-900/50 hover:bg-red-900/80 text-red-200 rounded text-xs flex items-center gap-2"
+                                title="Delete [Del]"
+                            >
+                                <span>删除</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div
+                        className="flex-1 relative overflow-hidden"
+                        onWheel={(e) => {
+                            // Scroll to change time
+                            const delta = e.deltaY;
+                            // Zoom factor affects scroll speed?
+                            const timeDelta = delta * (1000 / zoomLevel);
+                            const newTime = Math.max(0, currentTime + timeDelta);
+                            setTime(newTime);
+
+                            // If playing, also seek the audio immediately
+                            if (isPlaying && audioRef.current) {
+                                audioRef.current.currentTime = newTime / 1000;
+                            }
+                        }}
+                    >
+                        <div className="absolute inset-0 flex justify-center">
+                            {/* Fixed Judgment Line */}
+                            <div className="absolute left-0 right-0 bottom-[20%] h-1 bg-red-500 z-20 shadow-[0_0_10px_rgba(239,68,68,0.8)] pointer-events-none">
+                                <div className="absolute right-0 bottom-0 text-red-500 text-xs font-mono bg-black/50 px-1">
+                                    JUDGMENT
+                                </div>
+                            </div>
+
+                            {/* Moving Track Container */}
+                            <div
+                                className="track-area w-[400px] absolute bottom-[20%] border-x border-gray-800 bg-black/20"
                                 style={{
-                                    height: '100000px', // Tall enough
-                                    backgroundImage: `linear-gradient(to top, #fff 1px, transparent 1px)`, // Draw lines upwards
-                                    // If snap is 0 (Free), show 1/4 lines as reference
-                                    // 120 BPM -> 500ms/beat. 
-                                    // Snap 4 -> 500ms. Snap 8 -> 250ms.
-                                    // zoomLevel is px per 1000ms.
-                                    // Spacing = (500 * 4 / snap) / 1000 * zoom
-                                    //         = 2 / snap * zoom
-                                    backgroundSize: `100% ${zoomLevel * 2 / (snapDivisor || 4)}px`,
-                                    backgroundPosition: 'bottom'
+                                    height: '0px', // Allow overflow
+                                    transform: `translateY(${currentTime / 1000 * zoomLevel}px)`,
+                                    transition: isPlaying ? 'none' : 'transform 0.1s ease-out'
                                 }}
-                            />
-
-                            {/* Lane Dividers */}
-                            {[1, 2, 3].map(i => (
-                                <div key={i} className="absolute bottom-0 top-[-100000px] w-px bg-gray-800" style={{ left: `${i * 25}%` }} />
-                            ))}
-
-                            {/* Notes */}
-                            {notes.map(note => (
-                                <div
-                                    key={note.id}
-                                    className={`absolute w-[23%] h-4 rounded-sm border transition-colors cursor-pointer z-30
-                                        ${note.lane === 0 ? 'left-[1%]' : note.lane === 1 ? 'left-[26%]' : note.lane === 2 ? 'left-[51%]' : 'left-[76%]'}
-                                        ${selectedNoteIds.includes(note.id) ? 'border-white bg-opacity-100' : 'border-transparent bg-opacity-80'}
-                                        ${note.color === 'pink' ? 'bg-pink-500' : 'bg-blue-500'}
-                                    `}
-                                    style={{
-                                        bottom: `${note.time / 1000 * zoomLevel}px`, // Position from bottom
-                                    }}
-                                    onMouseDown={(e) => {
-                                        e.preventDefault(); // Prevent native drag/selection
-                                        e.stopPropagation();
-                                        console.log('Start drag', note.id);
-                                        selectNote(note.id, e.shiftKey);
-                                        dragRef.current = {
-                                            id: note.id,
-                                            startY: e.clientY,
+                                onMouseDown={(e) => {
+                                    // Start selection if not clicking on a note (notes stop propagation)
+                                    if (e.button === 0) { // Left click
+                                        const startPoint = {
                                             startX: e.clientX,
-                                            startTime: note.time,
-                                            startLane: note.lane
+                                            startY: e.clientY,
+                                            currentX: e.clientX,
+                                            currentY: e.clientY,
+                                            isSelecting: true
                                         };
+                                        selectionRef.current = startPoint;
+                                        setSelectionBox(startPoint);
+                                    }
+                                }}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                }}
+                            >
+                                {/* Grid Lines */}
+                                <div className="absolute bottom-0 left-0 right-0 pointer-events-none opacity-20"
+                                    style={{
+                                        height: '100000px', // Tall enough
+                                        backgroundImage: `linear-gradient(to top, #fff 1px, transparent 1px)`, // Draw lines upwards
+                                        // If snap is 0 (Free), show 1/4 lines as reference
+                                        // 120 BPM -> 500ms/beat. 
+                                        // Snap 4 -> 500ms. Snap 8 -> 250ms.
+                                        // zoomLevel is px per 1000ms.
+                                        // Spacing = (500 * 4 / snap) / 1000 * zoom
+                                        //         = 2 / snap * zoom
+                                        backgroundSize: `100% ${zoomLevel * 2 / (snapDivisor || 4)}px`,
+                                        backgroundPosition: 'bottom'
                                     }}
                                 />
-                            ))}
 
-                            {/* Click Area for Adding Notes */}
-                            <div
-                                className="absolute bottom-0 left-0 right-0 z-10"
-                                style={{ height: '100000px', top: 'auto' }} // Extend upwards
-                                onClick={(e) => {
-                                    const rect = e.currentTarget.getBoundingClientRect();
-                                    // e.clientY is viewport Y.
-                                    // rect.bottom is viewport Y of the bottom of this container.
-                                    // Since this container's bottom is at Judgment Line + translateY.
-                                    // Distance from bottom of container = rect.bottom - e.clientY.
+                                {/* Lane Dividers */}
+                                {[1, 2, 3].map(i => (
+                                    <div key={i} className="absolute bottom-0 top-[-100000px] w-px bg-gray-800" style={{ left: `${i * 25}%` }} />
+                                ))}
 
-                                    const yFromBottom = rect.bottom - e.clientY;
+                                {/* Notes */}
+                                {notes.map(note => (
+                                    <div
+                                        key={note.id}
+                                        className={`absolute w-[23%] h-4 rounded-sm border transition-colors cursor-pointer z-30
+                                            ${note.lane === 0 ? 'left-[1%]' : note.lane === 1 ? 'left-[26%]' : note.lane === 2 ? 'left-[51%]' : 'left-[76%]'}
+                                            ${selectedNoteIds.includes(note.id) ? 'border-white border-2 shadow-[0_0_8px_rgba(255,255,255,0.8)] bg-opacity-100' : 'border-transparent bg-opacity-80'}
+                                            ${note.color === 'pink' ? 'bg-pink-500' : 'bg-blue-500'}
+                                        `}
+                                        style={{
+                                            bottom: `${note.time / 1000 * zoomLevel}px`, // Position from bottom
+                                        }}
+                                        onMouseDown={(e) => {
+                                            e.preventDefault(); // Prevent native drag/selection
+                                            e.stopPropagation();
 
-                                    const laneWidth = rect.width / 4;
-                                    const x = e.clientX - rect.left;
-                                    const lane = Math.floor(x / laneWidth);
+                                            // Right click to delete
+                                            if (e.button === 2) {
+                                                removeNote(note.id);
+                                                return;
+                                            }
 
-                                    // time = y / zoom * 1000
-                                    const rawTime = (yFromBottom / zoomLevel) * 1000;
+                                            console.log('Start drag', note.id);
 
-                                    // Snap
-                                    const beatTime = 60000 / 120;
-                                    let snappedTime = rawTime;
+                                            // Logic for multi-select drag:
+                                            // If clicking on an already selected note, drag all selected notes.
+                                            // If clicking on an unselected note, select ONLY that note (unless Shift), then drag.
 
-                                    // Apply snap if not Free (0) and Shift is not held
-                                    if (snapDivisor > 0 && !e.shiftKey) {
-                                        const snapInterval = beatTime * (4 / snapDivisor);
-                                        snappedTime = Math.round(rawTime / snapInterval) * snapInterval;
-                                    }
+                                            let newSelectedIds = selectedNoteIds;
+                                            if (!selectedNoteIds.includes(note.id)) {
+                                                if (e.shiftKey) {
+                                                    selectNote(note.id, true); // Add to selection
+                                                    newSelectedIds = [...selectedNoteIds, note.id];
+                                                } else {
+                                                    setSelectedNotes([note.id]); // Replace selection
+                                                    newSelectedIds = [note.id];
+                                                }
+                                            }
 
-                                    if (snappedTime >= 0) {
-                                        addNote(lane, snappedTime);
-                                    }
-                                }}
-                            />
+                                            // Prepare drag state for ALL selected notes
+                                            const draggingNotes = notes.filter(n => newSelectedIds.includes(n.id)).map(n => ({
+                                                id: n.id,
+                                                startTime: n.time,
+                                                startLane: n.lane
+                                            }));
+
+                                            dragRef.current = {
+                                                startX: e.clientX,
+                                                startY: e.clientY,
+                                                notes: draggingNotes
+                                            };
+                                        }}
+                                        onContextMenu={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                        }}
+                                    />
+                                ))}
+
+                                {/* Click Area for Adding Notes */}
+                                <div
+                                    className="absolute bottom-0 left-0 right-0 z-10"
+                                    style={{ height: '100000px', top: 'auto' }} // Extend upwards
+                                />
+                            </div>
+
+                            {/* Selection Box Rendering */}
+                            {selectionBox && (
+                                <div
+                                    className="fixed border border-blue-500 bg-blue-500/20 pointer-events-none z-50"
+                                    style={{
+                                        left: Math.min(selectionBox.startX, selectionBox.currentX),
+                                        top: Math.min(selectionBox.startY, selectionBox.currentY),
+                                        width: Math.abs(selectionBox.currentX - selectionBox.startX),
+                                        height: Math.abs(selectionBox.currentY - selectionBox.startY)
+                                    }}
+                                />
+                            )}
                         </div>
                     </div>
                 </div>
