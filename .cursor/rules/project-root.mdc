@@ -1,0 +1,46 @@
+---
+description: 此项目的全局上下文、技术栈和核心编码规范，每次回答问题前必须参考。
+globs: **/*.{ts,tsx,js,jsx,json,css}
+alwaysApply: true
+---
+
+# 项目核心上下文
+
+- **架构模式**: Feature-First Components (组件与逻辑紧密结合), Global State Management via Zustand, 3D/2D Separation (React Three Fiber for game view, DOM for UI).
+- **主要技术栈**:
+  - **Framework**: React 19
+  - **Build Tool**: Vite 7.2
+  - **Language**: TypeScript (~5.9)
+  - **Styling**: Tailwind CSS v4
+  - **3D Engine**: Three.js + React Three Fiber (R3F) + Drei
+  - **State Management**: Zustand v5
+  - **Routing**: Manual State-based Routing (in App.tsx)
+
+# 必须遵守的编码规范 (Hard Rules)
+
+1.  **组件风格**:
+    - 必须使用 **Functional Components** 和 **Hooks**。
+    - 优先使用具名导出 (`export const ComponentName = ...`)，避免 `export default` (除了页面级入口或配置文件)。
+    - 3D 逻辑放在 `src/components/GameScene.tsx` 或独立的 R3F 组件中，UI 逻辑放在 DOM 组件中。
+
+2.  **TypeScript 规范**:
+    - 启用严格模式 (`strict: true`)。
+    - 严禁使用 `any`，特殊情况使用 `unknown` 并进行类型收窄。
+    - 所有 Component Props 必须定义 Interface。
+    - 核心数据结构 (如 `Note`, `Song`) 必须在 `src/types/` 中定义。
+
+3.  **状态管理**:
+    - 全局游戏状态 (分数、时间、Note数据) 必须通过 `zustand` store 管理 (`src/store/`).
+    - 避免在 `useFrame` (R3F 渲染循环) 中进行昂贵的 React 状态更新，尽量使用 ref 或直接修改 Three.js 对象属性以保证性能，仅在必要时同步回 Store。
+
+4.  **性能优化**:
+    - 这是一个音乐节奏游戏，**Timing is everything**。
+    - 音频同步优先：使用 `AudioContext.currentTime` 或精确的 `performance.now()` 增量计算。
+    - 避免在游戏进行中触发大型组件的 Re-render。
+
+# 严禁出现的反模式 (Anti-patterns)
+
+- **禁止内联样式**: 必须使用 Tailwind CSS utility classes。
+- **禁止混合逻辑**: 不要在 3D Canvas 内部直接渲染 HTML DOM 元素 (使用 `<Html>` helper 除外，但尽量分层)。
+- **禁止直接修改 State**: 必须通过 Zustand 的 actions 修改全局状态。
+- **禁止复杂的依赖链**: `useEffect` 依赖项必须精确，防止死循环，特别是在涉及 `currentTime` 更新时。

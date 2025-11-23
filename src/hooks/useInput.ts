@@ -1,24 +1,19 @@
 import { useEffect } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { getJudgment, SCORES, JUDGMENT_WINDOWS } from '../utils/judgment';
+import { useSettingsStore } from '../store/settingsStore';
+import { getJudgment, JUDGMENT_WINDOWS } from '../utils/judgment';
 import { playHitSound } from '../utils/audio';
-
-const KEY_MAPPING: { [key: string]: number } = {
-    'KeyD': 0,
-    'KeyF': 1,
-    'KeyJ': 2,
-    'KeyK': 3,
-};
 
 export const useInput = () => {
     const { notes, currentTime, handleHit, handleMiss, isPlaying } = useGameStore();
+    const { laneKeys } = useSettingsStore();
 
     useEffect(() => {
         if (!isPlaying) return;
 
         const handleKeyDown = (e: KeyboardEvent) => {
-            const lane = KEY_MAPPING[e.code];
-            if (lane === undefined) return;
+            const lane = laneKeys.indexOf(e.code);
+            if (lane === -1) return;
 
             // Find the closest unhit note in this lane
             // We need to sort by time to get the earliest one? 
@@ -53,5 +48,5 @@ export const useInput = () => {
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [isPlaying, notes, currentTime, handleHit, handleMiss]);
+    }, [isPlaying, notes, currentTime, handleHit, handleMiss, laneKeys]);
 };

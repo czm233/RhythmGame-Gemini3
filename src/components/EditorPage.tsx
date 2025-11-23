@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { Note } from '../types/game';
 
 import { useEditorStore } from '../store/editorStore';
 import { playHitSound, initAudio } from '../utils/audio';
@@ -48,7 +49,7 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                 const laneWidth = 100; // Approx
                 const laneDelta = Math.round(deltaX / laneWidth);
 
-                const updates: { id: string, changes: Partial<any> }[] = [];
+                const updates: { id: string, changes: Partial<Note> }[] = [];
 
                 draggingNotes.forEach(note => {
                     let newTime = note.startTime + timeDelta;
@@ -311,7 +312,7 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                 }
 
                 // Check for notes passed in this frame (simple check for hit sound)
-                notes.forEach((note: any) => {
+                notes.forEach((note: Note) => {
                     if (note.time > currentTime && note.time <= newTime) {
                         playHitSound('PERFECT', hitSoundVolume, hitSoundType);
                     }
@@ -339,14 +340,12 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
     return (
         <div className="h-screen w-screen bg-gray-900 text-white flex flex-col overflow-hidden select-none">
             {/* Top Bar */}
-            <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center px-4 justify-between z-50">
+            <div className="h-12 bg-gray-800 border-b border-gray-700 flex items-center px-4 justify-between z-50 relative">
                 <div className="flex items-center gap-4">
                     <button onClick={onBack} className="text-gray-400 hover:text-white">
                         ← 返回
                     </button>
-                    <div className="text-sm font-mono text-gray-300">
-                        {audioFileName || "No Audio Loaded"}
-                    </div>
+                    
                     <div className="flex items-center gap-2">
                         <button
                             onClick={togglePlay}
@@ -361,7 +360,12 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                     </div>
                 </div>
 
+                <div className="absolute left-1/2 transform -translate-x-1/2 text-sm font-mono text-gray-300">
+                    {audioFileName || "No Audio Loaded"}
+                </div>
+
                 <div className="flex items-center gap-4">
+                    <audio ref={audioRef} src={audioUrl} />
                     <input
                         type="file"
                         accept="audio/*"
