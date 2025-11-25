@@ -25,6 +25,10 @@ interface EditorState {
     loopStart: number | null;
     loopEnd: number | null;
 
+    // History
+    past: Note[][];
+    future: Note[][];
+
     // Actions
     togglePlay: () => void;
     setTime: (time: number) => void;
@@ -55,6 +59,10 @@ interface EditorState {
     mirrorSelection: () => void;
     randomizeSelection: () => void;
     deleteSelection: () => void;
+
+    // History Actions
+    undo: () => void;
+    redo: () => void;
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -73,6 +81,9 @@ export const useEditorStore = create<EditorState>((set) => ({
 
     loopStart: null,
     loopEnd: null,
+
+    past: [],
+    future: [],
 
     clipboard: [],
 
@@ -95,13 +106,24 @@ export const useEditorStore = create<EditorState>((set) => ({
             hit: false,
             missed: false
         };
-        return { notes: [...state.notes, newNote].sort((a, b) => a.time - b.time) };
+        // Save history
+        const newPast = [...state.past, state.notes];
+        return { 
+            notes: [...state.notes, newNote].sort((a, b) => a.time - b.time),
+            past: newPast,
+            future: [] // Clear future on new action
+        };
     }),
 
-    removeNote: (id) => set((state) => ({
-        notes: state.notes.filter(n => n.id !== id),
-        selectedNoteIds: state.selectedNoteIds.filter(sid => sid !== id)
-    })),
+    removeNote: (id) => set((state) => {
+        const newPast = [...state.past, state.notes];
+        return {
+            notes: state.notes.filter(n => n.id !== id),
+            selectedNoteIds: state.selectedNoteIds.filter(sid => sid !== id),
+            past: newPast,
+            future: []
+        };
+    }),
 
     selectNote: (id, multi = false) => set((state) => ({
         selectedNoteIds: multi
@@ -113,12 +135,17 @@ export const useEditorStore = create<EditorState>((set) => ({
 
     setSelectedNotes: (ids: string[]) => set({ selectedNoteIds: ids }),
 
-    updateNotes: (updates: { id: string, changes: Partial<Note> }[]) => set((state) => ({
-        notes: state.notes.map((note) => {
-            const update = updates.find(u => u.id === note.id);
-            return update ? { ...note, ...update.changes } : note;
-        })
-    })),
+    updateNotes: (updates: { id: string, changes: Partial<Note> }[]) => set((state) => {
+        const newPast = [...state.past, state.notes];
+        return {
+            notes: state.notes.map((note) => {
+                const update = updates.find(u => u.id === note.id);
+                return update ? { ...note, ...update.changes } : note;
+            }),
+            past: newPast,
+            future: []
+        };
+    }),
 
     setLoopStart: (time) => set({ loopStart: time }),
     setLoopEnd: (time) => set({ loopEnd: time }),
@@ -147,46 +174,86 @@ export const useEditorStore = create<EditorState>((set) => ({
 
         if (newNotes.length === 0) return {};
 
+        const newPast = [...state.past, state.notes];
         return {
             notes: [...state.notes, ...newNotes],
-            selectedNoteIds: newNotes.map(n => n.id)
+            selectedNoteIds: newNotes.map(n => n.id),
+            past: newPast,
+            future: []
         };
     }),
 
     mirrorSelection: () => set((state) => {
+        const newPast = [...state.past, state.notes];
         const updates = state.notes.map(note => {
             if (state.selectedNoteIds.includes(note.id)) {
                 return { ...note, lane: 3 - note.lane };
             }
             return note;
         });
-        return { notes: updates };
+        return { notes: updates, past: newPast, future: [] };
     }),
 
     randomizeSelection: () => set((state) => {
+        const newPast = [...state.past, state.notes];
         const updates = state.notes.map(note => {
             if (state.selectedNoteIds.includes(note.id)) {
-                // Randomize lane (0-3) independently
                 const randomLane = Math.floor(Math.random() * 4);
                 return { ...note, lane: randomLane };
             }
             return note;
         });
-        // Note: This might cause overlaps (multiple notes at same time/lane).
-        // Based on "each row has its own independent random", this is the expected behavior.
-        return { notes: updates };
+        return { notes: updates, past: newPast, future: [] };
     }),
 
-    deleteSelection: () => set((state) => ({
-        notes: state.notes.filter(n => !state.selectedNoteIds.includes(n.id)),
-        selectedNoteIds: []
-    })),
+    deleteSelection: () => set((state) => {
+        const newPast = [...state.past, state.notes];
+        return {
+            notes: state.notes.filter(n => !state.selectedNoteIds.includes(n.id)),
+            selectedNoteIds: [],
+            past: newPast,
+            future: []
+        };
+    }),
 
     clearSelection: () => set({ selectedNoteIds: [] }),
 
-    updateNote: (id, updates) => set((state) => ({
-        notes: state.notes.map(n => n.id === id ? { ...n, ...updates } : n)
-    })),
+    updateNote: (id, updates) => set((state) => {
+        const newPast = [...state.past, state.notes];
+        return {
+            notes: state.notes.map(n => n.id === id ? { ...n, ...updates } : n),
+            past: newPast,
+            future: []
+        };
+    }),
+
+    undo: () => set((state) => {
+        if (state.past.length === 0) return {};
+        
+        const previous = state.past[state.past.length - 1];
+        const newPast = state.past.slice(0, -1);
+        const newFuture = [state.notes, ...state.future];
+        
+        return {
+            notes: previous,
+            past: newPast,
+            future: newFuture
+        };
+    }),
+
+    redo: () => set((state) => {
+        if (state.future.length === 0) return {};
+        
+        const next = state.future[0];
+        const newFuture = state.future.slice(1);
+        const newPast = [...state.past, state.notes];
+        
+        return {
+            notes: next,
+            past: newPast,
+            future: newFuture
+        };
+    }),
 
     setToolColor: (color) => set({ selectedToolColor: color }),
     setAudioUrl: (url) => set({ audioUrl: url }),

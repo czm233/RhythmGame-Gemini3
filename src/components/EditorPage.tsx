@@ -15,7 +15,8 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
         togglePlay, setTime, setSnap, setZoom, addNote, removeNote, selectNote, updateNote, updateNotes,
         setToolColor, setAudioUrl, setAudioFileName, setHitSoundVolume, setHitSoundType, setSelectedNotes,
         setLoopStart, setLoopEnd,
-        copySelection, pasteNotes, mirrorSelection, randomizeSelection, deleteSelection
+        copySelection, pasteNotes, mirrorSelection, randomizeSelection, deleteSelection,
+        undo, redo
     } = useEditorStore();
 
     // Dragging state
@@ -222,6 +223,21 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                 if (audioUrl) {
                     togglePlay();
                 }
+                return;
+            }
+
+            // Undo: Ctrl+Z
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ' && !e.shiftKey) {
+                e.preventDefault();
+                undo();
+                return;
+            }
+
+            // Redo: Ctrl+Shift+Z or Ctrl+Y
+            if (((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'KeyZ') || 
+                ((e.ctrlKey || e.metaKey) && e.code === 'KeyY')) {
+                e.preventDefault();
+                redo();
                 return;
             }
 
@@ -645,6 +661,26 @@ export const EditorPage = ({ onBack }: EditorPageProps) => {
                                     ×
                                 </button>
                             )}
+                        </div>
+
+                        <div className="w-px h-6 bg-gray-700 mx-2" />
+
+                        {/* History Controls */}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={undo}
+                                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-200 flex items-center gap-2"
+                                title="Undo [Ctrl+Z]"
+                            >
+                                <span>撤销</span>
+                            </button>
+                            <button
+                                onClick={redo}
+                                className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-gray-200 flex items-center gap-2"
+                                title="Redo [Ctrl+Y]"
+                            >
+                                <span>重做</span>
+                            </button>
                         </div>
 
                         <div className="w-px h-6 bg-gray-700 mx-2" />
